@@ -53,10 +53,18 @@
     clock-frequency = <I2C_BITRATE_FAST>;
 
     /* MAX30102 Heart Rate Sensor */
-    max30102@57 {
+    max30102: max30102@57 {
         compatible = "maxim,max30102";
         reg = <0x57>;
         label = "MAX30102";
+        status = "okay";
+        
+        /* Driver configuration properties */
+        sample-rate = <100>;        /* 100 Hz sampling */
+        led-current-red = <63>;     /* 0x3F = ~27mA */
+        led-current-ir = <63>;      /* 0x3F = ~27mA */
+        adc-range = <4096>;         /* 4096 nA range */
+        pulse-width = <411>;        /* 411 μs pulse width */
     };
 
     /* MPU6050 Accelerometer/Gyroscope */

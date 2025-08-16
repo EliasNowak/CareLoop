@@ -1,124 +1,137 @@
 /*
- * CareLoop - Health Monitoring Device (Basic Implementation)
- * Copyright (c) 2024 Nordic Semiconductor ASA
+ * Copyright (c) 2024
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
-#include <zephyr/bluetooth/bluetooth.h>
-#include <zephyr/bluetooth/hci.h>
-#include <zephyr/bluetooth/conn.h>
-#include <zephyr/bluetooth/uuid.h>
-#include <zephyr/bluetooth/gatt.h>
+#include <zephyr/device.h>
+#include <zephyr/drivers/sensor.h>
+#include <zephyr/drivers/i2c.h>
+#include "drivers/sensor/max30102/max30102.h"
 
-LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(careloop, LOG_LEVEL_DBG);
 
-#define DEVICE_NAME "CareLoop-Monitor"
-#define DEVICE_NAME_LEN (sizeof(DEVICE_NAME) - 1)
+#define MAX30102_NODE DT_NODELABEL(max30102)
+#define I2C_NODE DT_NODELABEL(i2c0)
 
-/* BLE Advertisement data */
-static const struct bt_data ad[] = {
-    BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
-    BT_DATA(BT_DATA_NAME_COMPLETE, DEVICE_NAME, DEVICE_NAME_LEN),
-};
-
-/* BLE connection callback */
-static void connected(struct bt_conn *conn, uint8_t err)
+static void i2c_scan(const struct device *i2c_dev)
 {
-    char addr[BT_ADDR_LE_STR_LEN];
+    uint8_t cnt = 0, first = 0x04, last = 0x77;
+
+    LOG_INF("I2C Bus Scan:");
+    LOG_INF("     0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f");
     
-    if (err) {
-        LOG_ERR("Connection failed (err 0x%02x)", err);
-        return;
+    for (uint8_t i = 0; i <= last; i += 16) {
+        printk("%02x: ", i);
+        for (uint8_t j = 0; j < 16; j++) {
+            if (i + j < first || i + j > last) {
+                printk("   ");
+                continue;
+            }
+
+            struct i2c_msg msgs[1];
+            uint8_t dst = 1;
+
+            msgs[0].buf = &dst;
+            msgs[0].len = 0U;
+            msgs[0].flags = I2C_MSG_WRITE | I2C_MSG_STOP;
+            
+            int result = i2c_transfer(i2c_dev, &msgs[0], 1, i + j);
+            if (result == 0) {
+                printk("%02x ", i + j);
+                ++cnt;
+                if (i + j == 0x57) {
+                    LOG_INF("*** Found MAX30102 at address 0x57! ***");
+                }
+            } else {
+                printk("-- ");
+                if (i + j == 0x57) {
+                    LOG_WRN("No response from MAX30102 at 0x57 (error: %d)", result);
+                }
+            }
+        }
+        printk("\n");
     }
     
-    bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
-    LOG_INF("Connected %s", addr);
-}
-
-static void disconnected(struct bt_conn *conn, uint8_t reason)
-{
-    char addr[BT_ADDR_LE_STR_LEN];
+    LOG_INF("Found %d device(s) on I2C bus", cnt);
     
-    bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
-    LOG_INF("Disconnected from %s (reason 0x%02x)", addr, reason);
-    
-    /* Restart advertising */
-    int err = bt_le_adv_start(BT_LE_ADV_CONN_NAME, ad, ARRAY_SIZE(ad), NULL, 0);
-    if (err) {
-        LOG_ERR("Advertising failed to start (err %d)", err);
+    if (cnt == 0) {
+        LOG_ERR("No I2C devices found! Check connections:");
+        LOG_ERR("- MAX30102 VCC → nRF52840 3.3V");
+        LOG_ERR("- MAX30102 GND → nRF52840 GND");  
+        LOG_ERR("- MAX30102 SDA → nRF52840 P0.26");
+        LOG_ERR("- MAX30102 SCL → nRF52840 P0.27");
+        LOG_ERR("- Ensure 3.3V power supply (NOT 5V)");
+        LOG_ERR("- Check wire connections and continuity");
     }
-}
-
-BT_CONN_CB_DEFINE(conn_callbacks) = {
-    .connected = connected,
-    .disconnected = disconnected,
-};
-
-/* Simple heart rate simulation */
-static uint16_t simulate_heart_rate(void)
-{
-    static uint16_t hr = 72;
-    static int8_t delta = 1;
-    
-    hr += delta;
-    if (hr >= 85) {
-        delta = -1;
-    } else if (hr <= 65) {
-        delta = 1;
-    }
-    
-    return hr;
 }
 
 int main(void)
 {
-    int err;
-    uint32_t loop_count = 0;
+    LOG_INF("=== CareLoop MAX30102 Integration Test ===");
     
-    LOG_INF("=== CareLoop Health Monitor Starting ===");
-    LOG_INF("Version: 1.0.0");
-    LOG_INF("Build: %s %s", __DATE__, __TIME__);
+    /* Check I2C bus first */
+    const struct device *i2c_dev = DEVICE_DT_GET(I2C_NODE);
     
-    /* Initialize Bluetooth */
-    err = bt_enable(NULL);
-    if (err) {
-        LOG_ERR("Bluetooth init failed (err %d)", err);
-        return err;
+    if (!device_is_ready(i2c_dev)) {
+        LOG_ERR("I2C device not ready");
+        return -1;
     }
     
-    LOG_INF("Bluetooth initialized");
+    LOG_INF("I2C device ready");
     
-    /* Start advertising */
-    err = bt_le_adv_start(BT_LE_ADV_CONN_NAME, ad, ARRAY_SIZE(ad), NULL, 0);
-    if (err) {
-        LOG_ERR("Advertising failed to start (err %d)", err);
-        return err;
+    /* Scan I2C bus for devices */
+    i2c_scan(i2c_dev);
+    
+    /* Get the MAX30102 device */
+    const struct device *max30102_dev = DEVICE_DT_GET(MAX30102_NODE);
+    
+    if (!device_is_ready(max30102_dev)) {
+        LOG_ERR("MAX30102 device not ready");
+        LOG_INF("Check:");
+        LOG_INF("1. Hardware connections (VCC, GND, SDA, SCL)");
+        LOG_INF("2. I2C address 0x57 appears in scan above");
+        LOG_INF("3. Sensor power supply (3.3V)");
+        return -1;
     }
     
-    LOG_INF("BLE advertising started as '%s'", DEVICE_NAME);
-    LOG_INF("CareLoop initialized successfully!");
+    LOG_INF("MAX30102 device ready! Starting sensor readings...");
     
-    /* Main application loop */
+    struct sensor_value red_val, ir_val;
+    int ret;
+    uint32_t sample_count = 0;
+    
     while (1) {
-        loop_count++;
-        
-        /* Simulate sensor readings every 5 seconds */
-        if (loop_count % 50 == 0) {
-            uint16_t hr = simulate_heart_rate();
-            LOG_INF("Heart Rate: %d BPM (simulated)", hr);
+        /* Trigger a sensor reading */
+        ret = sensor_sample_fetch(max30102_dev);
+        if (ret) {
+            LOG_ERR("Failed to fetch sample (err %d)", ret);
+            k_sleep(K_SECONDS(1));
+            continue;
         }
         
-        /* Log status every 10 seconds */
-        if (loop_count % 100 == 0) {
-            LOG_INF("System running - Loop: %d, Uptime: %d sec", 
-                    loop_count, k_uptime_get_32() / 1000);
+        /* Get the red LED channel data */
+        ret = sensor_channel_get(max30102_dev, SENSOR_CHAN_RED, &red_val);
+        if (ret) {
+            LOG_ERR("Failed to get red channel (err %d)", ret);
+        } else {
+            LOG_INF("Sample #%d - Red: %d, IR: TBD", sample_count, red_val.val1);
         }
         
-        /* Sleep for 100ms */
-        k_msleep(100);
+        /* Get the IR LED channel data */
+        ret = sensor_channel_get(max30102_dev, SENSOR_CHAN_IR, &ir_val);
+        if (ret) {
+            LOG_ERR("Failed to get IR channel (err %d)", ret);
+        } else {
+            LOG_INF("Sample #%d - Red: %d, IR: %d", sample_count, red_val.val1, ir_val.val1);
+        }
+        
+        sample_count++;
+        
+        /* Sleep for 1 second */
+        k_sleep(K_SECONDS(1));
     }
     
     return 0;
