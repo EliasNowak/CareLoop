@@ -4,6 +4,4 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-zephyr_library()
-zephyr_library_sources(max30102.c)
-zephyr_library_link_libraries(drivers__sensor)
+# This file is now unused - driver is included conditionally from main CMakeLists.txt

@@ -66,13 +66,6 @@
         adc-range = <4096>;         /* 4096 nA range */
         pulse-width = <411>;        /* 411 μs pulse width */
     };
-
-    /* MPU6050 Accelerometer/Gyroscope */
-    mpu6050@68 {
-        compatible = "invensense,mpu6050";
-        reg = <0x68>;
-        label = "MPU6050";
-    };
 };
 
 &adc {

@@ -67,10 +67,6 @@ static int max30102_channel_get(const struct device *dev,
 		return -ENOTSUP;
 	}
 
-	/* Check if the led channel is active by looking up the associated fifo
-	 * channel. If the fifo channel isn't valid, then the led channel
-	 * isn't active.
-	 */
 	fifo_chan = data->map[led_chan];
 	if (fifo_chan >= MAX30102_MAX_NUM_CHANNELS) {
 		LOG_ERR("Inactive sensor channel");
@@ -88,6 +84,38 @@ static DEVICE_API(sensor, max30102_driver_api) = {
 	.sample_fetch = max30102_sample_fetch,
 	.channel_get = max30102_channel_get,
 };
+
+static int max30102_clear_fifo(const struct device *dev)
+{
+	const struct max30102_config *config = dev->config;
+	int ret;
+
+	LOG_DBG("Clearing FIFO pointers for clean start");
+
+	/* Clear FIFO write pointer */
+	ret = i2c_reg_write_byte_dt(&config->i2c, MAX30102_REG_FIFO_WR, 0x00);
+	if (ret) {
+		LOG_ERR("Failed to clear FIFO write pointer");
+		return ret;
+	}
+
+	/* Clear FIFO overflow counter */
+	ret = i2c_reg_write_byte_dt(&config->i2c, MAX30102_REG_FIFO_OVF, 0x00);
+	if (ret) {
+		LOG_ERR("Failed to clear FIFO overflow counter");
+		return ret;
+	}
+
+	/* Clear FIFO read pointer */
+	ret = i2c_reg_write_byte_dt(&config->i2c, MAX30102_REG_FIFO_RD, 0x00);
+	if (ret) {
+		LOG_ERR("Failed to clear FIFO read pointer");
+		return ret;
+	}
+
+	LOG_DBG("FIFO cleared successfully");
+	return 0;
+}
 
 static int max30102_init(const struct device *dev)
 {
@@ -129,6 +157,12 @@ static int max30102_init(const struct device *dev)
 			return -EIO;
 		}
 	} while (mode_cfg & MAX30102_MODE_CFG_RESET_MASK);
+
+	/* Clear FIFO pointers to ensure clean state */
+	if (max30102_clear_fifo(dev)) {
+		LOG_ERR("Failed to clear FIFO");
+		return -EIO;
+	}
 
 	/* Write the FIFO configuration register */
 	if (i2c_reg_write_byte_dt(&config->i2c, MAX30102_REG_FIFO_CFG,
@@ -178,41 +212,68 @@ static int max30102_init(const struct device *dev)
 	/* Initialize the channel map and active channel count */
 	data->num_channels = 0U;
 	for (led_chan = 0U; led_chan < MAX30102_MAX_NUM_CHANNELS; led_chan++) {
-		data->map[led_chan] = MAX30102_MAX_NUM_CHANNELS;
+		data->map[led_chan] = MAX30102_MAX_NUM_CHANNELS;  /* Invalid value initially */
 	}
 
 	/* Count the number of active channels and build a map that translates
-	 * the LED channel number (red/ir/green) to the fifo channel number.
+	 * the LED channel number (red/ir) to the fifo channel number.
 	 */
-	for (fifo_chan = 0; fifo_chan < MAX30102_MAX_NUM_CHANNELS;
-	     fifo_chan++) {
-		led_chan = (config->slot[fifo_chan] & MAX30102_SLOT_LED_MASK)-1;
-		if (led_chan < MAX30102_MAX_NUM_CHANNELS) {
-			data->map[led_chan] = fifo_chan;
-			data->num_channels++;
+	for (fifo_chan = 0; fifo_chan < MAX30102_MAX_NUM_CHANNELS; fifo_chan++) {
+		/* Skip disabled slots */
+		if (config->slot[fifo_chan] == MAX30102_SLOT_DISABLED) {
+			LOG_INF("FIFO[%d]: DISABLED", fifo_chan);
+			continue;
 		}
+		
+		/* Map slot to LED channel */
+		if (config->slot[fifo_chan] == MAX30102_SLOT_RED_LED1_PA) {
+			led_chan = MAX30102_LED_CHANNEL_RED;
+		} else if (config->slot[fifo_chan] == MAX30102_SLOT_IR_LED2_PA) {
+			led_chan = MAX30102_LED_CHANNEL_IR;
+		} else {
+			LOG_WRN("FIFO[%d]: Unknown slot %d", fifo_chan, config->slot[fifo_chan]);
+			continue;
+		}
+		
+		LOG_INF("FIFO[%d]: slot=%d -> LED channel=%d", fifo_chan, config->slot[fifo_chan], led_chan);
+		data->map[led_chan] = fifo_chan;
+		data->num_channels++;
+		LOG_INF("  -> Mapped LED channel %d to FIFO channel %d", led_chan, fifo_chan);
 	}
-
 	return 0;
 }
 
 static struct max30102_config max30102_config = {
 	.i2c = I2C_DT_SPEC_INST_GET(0),
-	.fifo = (0 << MAX30102_FIFO_CFG_SMP_AVE_SHIFT) |
-		(15 << MAX30102_FIFO_CFG_FIFO_FULL_SHIFT),
+	.fifo = (CONFIG_MAX30102_SMP_AVE << MAX30102_FIFO_CFG_SMP_AVE_SHIFT) |
+		(CONFIG_MAX30102_FIFO_A_FULL << MAX30102_FIFO_CFG_FIFO_FULL_SHIFT),
 
+#if defined(CONFIG_MAX30102_HEART_RATE_MODE)
+	.mode = MAX30102_MODE_HEART_RATE,
+	.slot[0] = MAX30102_SLOT_RED_LED1_PA,
+	.slot[1] = MAX30102_SLOT_DISABLED,
+	.slot[2] = MAX30102_SLOT_DISABLED,
+	.slot[3] = MAX30102_SLOT_DISABLED,
+#elif defined(CONFIG_MAX30102_SPO2_MODE)
 	.mode = MAX30102_MODE_SPO2,
 	.slot[0] = MAX30102_SLOT_RED_LED1_PA,
 	.slot[1] = MAX30102_SLOT_IR_LED2_PA,
 	.slot[2] = MAX30102_SLOT_DISABLED,
 	.slot[3] = MAX30102_SLOT_DISABLED,
+#elif defined(CONFIG_MAX30102_MULTI_LED_MODE)
+	.mode = MAX30102_MODE_MULTI_LED,
+	.slot[0] = MAX30102_SLOT_RED_LED1_PA,
+	.slot[1] = MAX30102_SLOT_IR_LED2_PA,
+	.slot[2] = MAX30102_SLOT_DISABLED,
+	.slot[3] = MAX30102_SLOT_DISABLED,
+#endif
 
-	.spo2 = (0 << MAX30102_SPO2_ADC_RGE_SHIFT) |
-		(0 << MAX30102_SPO2_SR_SHIFT) |
+	.spo2 = (CONFIG_MAX30102_ADC_RGE << MAX30102_SPO2_ADC_RGE_SHIFT) |
+		(CONFIG_MAX30102_SR << MAX30102_SPO2_SR_SHIFT) |
 		(MAX30102_PW_18BITS << MAX30102_SPO2_PW_SHIFT),
 
-	.led_pa[0] = 31,  /* Red LED current */
-	.led_pa[1] = 31,  /* IR LED current */
+	.led_pa[0] = CONFIG_MAX30102_LED1_PA,  /* Red LED current */
+	.led_pa[1] = CONFIG_MAX30102_LED2_PA,  /* IR LED current */
 };
 
 static struct max30102_data max30102_data;
