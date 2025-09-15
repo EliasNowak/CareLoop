@@ -66,6 +66,12 @@
         adc-range = <4096>;         /* 4096 nA range */
         pulse-width = <411>;        /* 411 μs pulse width */
     };
+
+    mpu6050: mpu6050@68 {
+        compatible = "invensense,mpu6050";
+        reg = <0x68>;
+        status = "okay";
+    };
 };
 
 &adc {

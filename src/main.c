@@ -1,137 +1,80 @@
 /*
+ * CareLoop - Minimal HAL Heart Rate Monitor
  * Copyright (c) 2024
- *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include "hal_sensor.h"
+#include "hal_max30102.h"
+
 #include <zephyr/device.h>
 #include <zephyr/drivers/sensor.h>
-#include <zephyr/drivers/i2c.h>
-#include "drivers/sensor/max30102/max30102.h"
+#define MPU6050_NODE DT_NODELABEL(mpu6050)
 
-LOG_MODULE_REGISTER(careloop, LOG_LEVEL_DBG);
+void read_mpu6050(void) {
+    const struct device *mpu = DEVICE_DT_GET(MPU6050_NODE);
+    struct sensor_value accel[3], gyro[3];
 
-#define MAX30102_NODE DT_NODELABEL(max30102)
-#define I2C_NODE DT_NODELABEL(i2c0)
-
-static void i2c_scan(const struct device *i2c_dev)
-{
-    uint8_t cnt = 0, first = 0x04, last = 0x77;
-
-    LOG_INF("I2C Bus Scan:");
-    LOG_INF("     0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f");
-    
-    for (uint8_t i = 0; i <= last; i += 16) {
-        printk("%02x: ", i);
-        for (uint8_t j = 0; j < 16; j++) {
-            if (i + j < first || i + j > last) {
-                printk("   ");
-                continue;
-            }
-
-            struct i2c_msg msgs[1];
-            uint8_t dst = 1;
-
-            msgs[0].buf = &dst;
-            msgs[0].len = 0U;
-            msgs[0].flags = I2C_MSG_WRITE | I2C_MSG_STOP;
-            
-            int result = i2c_transfer(i2c_dev, &msgs[0], 1, i + j);
-            if (result == 0) {
-                printk("%02x ", i + j);
-                ++cnt;
-                if (i + j == 0x57) {
-                    LOG_INF("*** Found MAX30102 at address 0x57! ***");
-                }
-            } else {
-                printk("-- ");
-                if (i + j == 0x57) {
-                    LOG_WRN("No response from MAX30102 at 0x57 (error: %d)", result);
-                }
-            }
-        }
-        printk("\n");
+    if (!device_is_ready(mpu)) {
+        printk("MPU6050 not ready\n");
+        return;
     }
-    
-    LOG_INF("Found %d device(s) on I2C bus", cnt);
-    
-    if (cnt == 0) {
-        LOG_ERR("No I2C devices found! Check connections:");
-        LOG_ERR("- MAX30102 VCC → nRF52840 3.3V");
-        LOG_ERR("- MAX30102 GND → nRF52840 GND");  
-        LOG_ERR("- MAX30102 SDA → nRF52840 P0.26");
-        LOG_ERR("- MAX30102 SCL → nRF52840 P0.27");
-        LOG_ERR("- Ensure 3.3V power supply (NOT 5V)");
-        LOG_ERR("- Check wire connections and continuity");
-    }
+
+    sensor_sample_fetch(mpu);
+    sensor_channel_get(mpu, SENSOR_CHAN_ACCEL_XYZ, accel);
+    sensor_channel_get(mpu, SENSOR_CHAN_GYRO_XYZ, gyro);
+
+    printk("Accel: %d %d %d\n", accel[0].val1, accel[1].val1, accel[2].val1);
+    printk("Gyro: %d %d %d\n", gyro[0].val1, gyro[1].val1, gyro[2].val1);
 }
+
+LOG_MODULE_REGISTER(careloop, LOG_LEVEL_INF);
 
 int main(void)
 {
-    LOG_INF("=== CareLoop MAX30102 Integration Test ===");
+    LOG_INF("CareLoop HAL Heart Rate Monitor");
     
-    /* Check I2C bus first */
-    const struct device *i2c_dev = DEVICE_DT_GET(I2C_NODE);
+    hal_error_t ret;
+    hal_sensor_t *sensor;
+    hal_sensor_reading_t reading;
     
-    if (!device_is_ready(i2c_dev)) {
-        LOG_ERR("I2C device not ready");
+    /* Initialize HAL system */
+    ret = hal_max30102_init();
+    if (ret != HAL_OK) {
+        LOG_ERR("HAL init failed: %d", ret);
         return -1;
     }
     
-    LOG_INF("I2C device ready");
-    
-    /* Scan I2C bus for devices */
-    i2c_scan(i2c_dev);
-    
-    /* Get the MAX30102 device */
-    const struct device *max30102_dev = DEVICE_DT_GET(MAX30102_NODE);
-    
-    if (!device_is_ready(max30102_dev)) {
-        LOG_ERR("MAX30102 device not ready");
-        LOG_INF("Check:");
-        LOG_INF("1. Hardware connections (VCC, GND, SDA, SCL)");
-        LOG_INF("2. I2C address 0x57 appears in scan above");
-        LOG_INF("3. Sensor power supply (3.3V)");
+    ret = hal_sensor_init_all();
+    if (ret != HAL_OK) {
+        LOG_ERR("Sensor init failed: %d", ret);
         return -1;
     }
     
-    LOG_INF("MAX30102 device ready! Starting sensor readings...");
+    /* Get heart rate sensor */
+    sensor = hal_sensor_get(HAL_SENSOR_TYPE_HEART_RATE);
+    if (!sensor) {
+        LOG_ERR("No heart rate sensor found");
+        return -1;
+    }
     
-    struct sensor_value red_val, ir_val;
-    int ret;
-    uint32_t sample_count = 0;
+    LOG_INF("Heart rate sensor ready");
     
+    /* Main reading loop */
     while (1) {
-        /* Trigger a sensor reading */
-        ret = sensor_sample_fetch(max30102_dev);
-        if (ret) {
-            LOG_ERR("Failed to fetch sample (err %d)", ret);
-            k_sleep(K_SECONDS(1));
-            continue;
+        ret = sensor->ops->read(&reading);
+        if (ret == HAL_OK) {
+            if (reading.quality >= HAL_QUALITY_FAIR) {
+                LOG_INF("HR: %d (Q:%d%%)", reading.raw_value, reading.quality);
+            }
         }
-        
-        /* Get the red LED channel data */
-        ret = sensor_channel_get(max30102_dev, SENSOR_CHAN_RED, &red_val);
-        if (ret) {
-            LOG_ERR("Failed to get red channel (err %d)", ret);
-        } else {
-            LOG_INF("Sample #%d - Red: %d, IR: TBD", sample_count, red_val.val1);
-        }
-        
-        /* Get the IR LED channel data */
-        ret = sensor_channel_get(max30102_dev, SENSOR_CHAN_IR, &ir_val);
-        if (ret) {
-            LOG_ERR("Failed to get IR channel (err %d)", ret);
-        } else {
-            LOG_INF("Sample #%d - Red: %d, IR: %d", sample_count, red_val.val1, ir_val.val1);
-        }
-        
-        sample_count++;
-        
-        /* Sleep for 1 second */
-        k_sleep(K_SECONDS(1));
+
+        /* Read and print MPU6050 sensor data */
+        read_mpu6050();
+
+        k_sleep(K_MSEC(200));
     }
     
     return 0;
