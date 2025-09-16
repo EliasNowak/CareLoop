@@ -12,7 +12,30 @@ target_sources(app PRIVATE
     src/main.c
 )
 
+# Hardware Abstraction Layer sources
+
+if(CONFIG_MPU6050)
+    # Only build MPU6050 adapter and driver when enabled
+    target_sources(app PRIVATE
+        src/hal/sensor/hal_mpu6050.c
+    )
+endif()
+
 if(CONFIG_MAX30102)
-    target_sources(app PRIVATE src/drivers/sensor/max30102/max30102.c)
+    # Only build MAX30102 adapter and driver when enabled
+    target_sources(app PRIVATE 
+        src/hal/sensor/hal_max30102.c
+        src/drivers/sensor/max30102/max30102.c
+    )
     target_include_directories(app PRIVATE src/drivers/sensor/max30102)
 endif()
+
+# Common HAL sources
+target_sources(app PRIVATE
+    src/hal/hal_sensor.c
+)
+
+# HAL include directories
+target_include_directories(app PRIVATE 
+    src/hal/include
+)
