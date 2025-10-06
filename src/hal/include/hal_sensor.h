@@ -9,9 +9,6 @@
 
 #include "hal_common.h"
 
-/**
- * @brief Sensor types supported by the HAL
- */
 typedef enum {
     HAL_SENSOR_TYPE_HEART_RATE = 0,
     HAL_SENSOR_TYPE_SPO2,
@@ -20,35 +17,26 @@ typedef enum {
     HAL_SENSOR_TYPE_COUNT
 } hal_sensor_type_t;
 
-/**
- * @brief Sensor reading structure
- */
 typedef struct {
-    hal_timestamp_t timestamp;     /**< Timestamp when reading was taken */
-    float value;                   /**< Sensor value (units depend on type) */
-    uint32_t raw_value;           /**< Raw ADC value */
+    hal_timestamp_t timestamp; 
+    float value;               /**< Sensor value (units depend on type) */
+    uint32_t raw_value;        
     /* Optional vector components for multi-axis sensors (set when relevant) */
     float x;
     float y;
     float z;
-    hal_quality_t quality;        /**< Signal quality (0-100%) */
-    hal_error_t error_code;       /**< Error code if reading failed */
+    hal_quality_t quality;        
+    hal_error_t error_code; 
 } hal_sensor_reading_t;
 
-/**
- * @brief Sensor configuration structure
- */
 typedef struct {
-    uint32_t sample_rate_hz;      /**< Sampling rate in Hz */
-    uint8_t led_current;          /**< LED current (0-255) */
-    uint16_t adc_range;           /**< ADC range setting */
-    uint16_t pulse_width_us;      /**< Pulse width in microseconds */
-    bool auto_calibrate;          /**< Enable auto-calibration */
+    uint32_t sample_rate_hz;      
+    uint8_t led_current;          
+    uint16_t adc_range;           
+    uint16_t pulse_width_us;      
+    bool auto_calibrate;          
 } hal_sensor_config_t;
 
-/**
- * @brief Sensor statistics structure
- */
 typedef struct {
     uint32_t total_samples;       /**< Total samples taken */
     uint32_t valid_samples;       /**< Valid samples count */
@@ -57,9 +45,6 @@ typedef struct {
     hal_timestamp_t last_reading; /**< Timestamp of last reading */
 } hal_sensor_stats_t;
 
-/**
- * @brief Sensor operations structure (function pointers)
- */
 typedef struct {
     /**
      * @brief Initialize the sensor
@@ -105,11 +90,15 @@ typedef struct {
      * @return HAL_OK on success, negative error code on failure
      */
     hal_error_t (*reset_stats)(void);
+
+    /**
+     * @brief Get current sensor configuration (optional)
+     * @param out Pointer to store configuration
+     * @return HAL_OK on success, error code on failure
+     */
+    hal_error_t (*get_config)(hal_sensor_config_t *out);
 } hal_sensor_ops_t;
 
-/**
- * @brief Sensor instance structure
- */
 typedef struct {
     hal_sensor_type_t type;       /**< Sensor type */
     const char *name;             /**< Sensor name string */
@@ -149,5 +138,18 @@ hal_sensor_t* hal_sensor_get(hal_sensor_type_t type);
  * @return HAL_OK on success, negative error code on failure
  */
 hal_error_t hal_sensor_init_all(void);
+
+/**
+ * @brief Get sensor sample rate in Hz, if available
+ * @param sensor Sensor instance pointer
+ * @return Sample rate in Hz, or 0 if unknown/unsupported
+ */
+static inline uint32_t hal_sensor_get_sample_rate(const hal_sensor_t *sensor)
+{
+    if (!sensor || !sensor->ops || !sensor->ops->get_config) return 0;
+    hal_sensor_config_t cfg;
+    if (sensor->ops->get_config(&cfg) != HAL_OK) return 0;
+    return cfg.sample_rate_hz;
+}
 
 #endif /* HAL_SENSOR_H */

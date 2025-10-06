@@ -12,7 +12,9 @@ target_sources(app PRIVATE
     src/main.c
 )
 
-# Hardware Abstraction Layer sources
+# ----------------------------------------
+# HAL - Hardware Abstraction Layer sources
+# ----------------------------------------
 
 if(CONFIG_MPU6050)
     # Only build MPU6050 adapter and driver when enabled
@@ -39,3 +41,10 @@ target_sources(app PRIVATE
 target_include_directories(app PRIVATE 
     src/hal/include
 )
+
+# ----------------------------------------
+# Business logic sources (C++)
+# ----------------------------------------
+
+target_sources(app PRIVATE src/business/heart_rate.cpp)
+target_include_directories(app PRIVATE src/business/include)

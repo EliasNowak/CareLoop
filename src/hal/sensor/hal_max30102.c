@@ -51,8 +51,32 @@ static hal_error_t max30102_hal_init(void)
         return HAL_ERROR_HARDWARE;
     }
     
-    /* Initialize configuration */
+    /* Initialize configuration from DT with defaults */
     max30102_priv.config = default_config;
+#if DT_NODE_HAS_PROP(MAX30102_NODE, sample_rate)
+    max30102_priv.config.sample_rate_hz = DT_PROP(MAX30102_NODE, sample_rate);
+#endif
+#if DT_NODE_HAS_PROP(MAX30102_NODE, led_current_red)
+    max30102_priv.config.led_current = DT_PROP(MAX30102_NODE, led_current_red);
+#endif
+#if DT_NODE_HAS_PROP(MAX30102_NODE, adc_range)
+    max30102_priv.config.adc_range = DT_PROP(MAX30102_NODE, adc_range);
+#endif
+#if DT_NODE_HAS_PROP(MAX30102_NODE, pulse_width)
+    max30102_priv.config.pulse_width_us = DT_PROP(MAX30102_NODE, pulse_width);
+#endif
+
+    /* Apply configuration via sensor API if supported */
+    struct sensor_value sval;
+    int rc;
+    /* Sampling frequency */
+#ifdef SENSOR_ATTR_SAMPLING_FREQUENCY
+    sval.val1 = (int)max30102_priv.config.sample_rate_hz;
+    sval.val2 = 0;
+    rc = sensor_attr_set(max30102_priv.dev, SENSOR_CHAN_ALL, SENSOR_ATTR_SAMPLING_FREQUENCY, &sval);
+    if (rc) { LOG_WRN("MAX30102: sampling freq set not supported (%d)", rc); }
+#endif
+    /* LED currents and other attributes would be mapped to driver-specific attrs if available */
     
     /* Reset statistics */
     memset(&max30102_priv.stats, 0, sizeof(max30102_priv.stats));
@@ -170,6 +194,16 @@ static hal_error_t max30102_hal_configure(const hal_sensor_config_t *config)
     
     /* Store configuration */
     max30102_priv.config = *config;
+
+    /* Attempt to push to driver */
+    struct sensor_value sval;
+    int rc;
+#ifdef SENSOR_ATTR_SAMPLING_FREQUENCY
+    sval.val1 = (int)config->sample_rate_hz;
+    sval.val2 = 0;
+    rc = sensor_attr_set(max30102_priv.dev, SENSOR_CHAN_ALL, SENSOR_ATTR_SAMPLING_FREQUENCY, &sval);
+    if (rc) { LOG_WRN("MAX30102: set rate failed (%d)", rc); }
+#endif
     
     LOG_INF("MAX30102 configured: rate=%dHz, led_current=%d", 
             config->sample_rate_hz, config->led_current);
@@ -258,6 +292,13 @@ static hal_error_t max30102_hal_reset_stats(void)
     return HAL_OK;
 }
 
+static hal_error_t max30102_hal_get_config(hal_sensor_config_t *out)
+{
+    if (!out) return HAL_ERROR_INVALID_PARAM;
+    *out = max30102_priv.config;
+    return HAL_OK;
+}
+
 /* MAX30102 operations structure */
 static const hal_sensor_ops_t max30102_ops = {
     .init = max30102_hal_init,
@@ -266,7 +307,8 @@ static const hal_sensor_ops_t max30102_ops = {
     .calibrate = max30102_hal_calibrate,
     .get_status = max30102_hal_get_status,
     .get_stats = max30102_hal_get_stats,
-    .reset_stats = max30102_hal_reset_stats
+    .reset_stats = max30102_hal_reset_stats,
+    .get_config = max30102_hal_get_config
 };
 
 /* MAX30102 sensor instance */
