@@ -6,7 +6,7 @@
 #include <zephyr/kernel.h>
 #include <string.h>
 
-LOG_MODULE_REGISTER(hal_max30102, LOG_LEVEL_DBG);
+LOG_MODULE_REGISTER(hal_max30102);
 
 #define MAX30102_NODE DT_NODELABEL(max30102)
 

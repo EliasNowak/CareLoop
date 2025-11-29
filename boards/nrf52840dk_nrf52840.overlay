@@ -41,7 +41,7 @@
     /* Power supply configuration */
     vbatt {
         compatible = "voltage-divider";
-        io-channels = <&adc 0>;
+        io-channels = <&adc 9>;
         output-ohms = <100000>;
         full-ohms = <(100000 + 100000)>;
     };

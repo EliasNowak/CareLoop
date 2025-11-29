@@ -7,6 +7,10 @@
 #ifndef HAL_SENSOR_H
 #define HAL_SENSOR_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "hal_common.h"
 
 typedef enum {
@@ -151,5 +155,9 @@ static inline uint32_t hal_sensor_get_sample_rate(const hal_sensor_t *sensor)
     if (sensor->ops->get_config(&cfg) != HAL_OK) return 0;
     return cfg.sample_rate_hz;
 }
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* HAL_SENSOR_H */

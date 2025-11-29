@@ -1,15 +1,20 @@
-/*
- * Battery Monitoring Header
- * Copyright (c) 2024 Nordic Semiconductor ASA
- *
- * SPDX-License-Identifier: Apache-2.0
- */
-
 #ifndef BATTERY_H_
 #define BATTERY_H_
 
 #include <stdbool.h>
 #include <stdint.h>
+
+// max current 10µA
+
+// max 3V input
+
+// Input range = (±0.6 V or ±VDD/4)/gain
+
+// 2.5V shut down 
+
+
+
+
 
 /**
  * @brief Initialize battery monitoring

@@ -46,5 +46,8 @@ target_include_directories(app PRIVATE
 # Business logic sources (C++)
 # ----------------------------------------
 
-target_sources(app PRIVATE src/business/heart_rate.cpp)
+target_sources(app PRIVATE
+    src/business/heart_rate.cpp
+    src/business/hr_filter.cpp
+)
 target_include_directories(app PRIVATE src/business/include)
